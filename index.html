@@ -538,6 +538,7 @@
   #northpole .np-hud span { font: 900 26px/1 'Nunito', system-ui, sans-serif; color: #fff; background: rgba(8, 28, 70, 0.7); border: 2px solid #8fd0ff; border-radius: 999px; padding: 8px 18px; min-width: 64px; text-align: center; }
   #northpole .np-hud .np-score::before { content: "★ "; color: #ffd75a; }
   #northpole .np-hud .np-time::before { content: "⏱ "; }
+  #northpole .np-hud .np-time.low { color: #ff9a9a; }
   #northpole .np-x { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 2px solid #8fd0ff; background: rgba(8, 28, 70, 0.7); color: #fff; font-size: 26px; line-height: 1; cursor: pointer; }
   #northpole .np-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(88vw, 380px); background: linear-gradient(#eaf5ff, #cfe6fa); border: 3px solid #8fd0ff; border-radius: 22px; padding: 22px 20px; text-align: center; color: #0b2a5c; box-shadow: 0 18px 50px rgba(0, 20, 70, 0.55); }
   #northpole .np-card[hidden] { display: none; }
@@ -3070,11 +3071,11 @@ const s = big ? 12 : 7.5, sp = bulbSprite(col, s), cy = y + sp.by;
     card.querySelector(".pk-ok").onclick = closePeek; card.querySelector(".pk-ok").focus();
   }
 })();
-/* ---------- North Pole snowball game (Konami code) ---------- */
+/* ---------- North Pole Christmas Present Toss (Konami code / string lights) ---------- */
 (function () {
   const CODE = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
   const TCODE = ["U","U","D","D","L","R","L","R","T","T"];
-  let kbuf = [], tbuf = [], root = null, running = false;
+  let kbuf = [], tbuf = [], root = null, stopGame = null;
 
   const onKey = (e) => {
     const tag = (e.target && e.target.tagName) || "";
@@ -3110,241 +3111,273 @@ const s = big ? 12 : 7.5, sp = bulbSprite(col, s), cy = y + sp.by;
       '<canvas></canvas>' +
       '<div class="np-hud" aria-live="off"><span class="np-score">0</span><span class="np-time">45</span></div>' +
       '<button type="button" class="np-x" aria-label="Leave the North Pole">&times;</button>' +
-      '<div class="np-card"><h2>The North Pole</h2><p>Tap or click to throw a snowball. Trees are 1 point, presents 2, evil snowmen 3, and Santa is worth <b>10</b>. You have 45 seconds.</p>' +
-      '<p class="np-best"></p><button type="button" class="np-go">Start throwing</button></div>';
+      '<div class="np-card"><h2>Christmas Present Toss</h2><p></p><p class="np-best"></p><button type="button" class="np-go">Start tossing</button></div>';
     document.body.appendChild(root);
     root.querySelector(".np-x").onclick = closeNP;
-    root.querySelector(".np-go").onclick = () => startRound();
-    showCard("The North Pole", "Tap or click to throw a snowball. Trees are 1 point, presents 2, evil snowmen 3, and Santa is worth <b>10</b>. You have 45 seconds.", "Start throwing");
-    sizeCanvas(); window.addEventListener("resize", sizeCanvas);
-    idleLoop();
+    stopGame = startGame(root);
   }
   function closeNP() {
-    running = false; cancelAnimationFrame(raf);
-    window.removeEventListener("resize", sizeCanvas);
+    if (stopGame) stopGame(); stopGame = null;
     if (root) root.remove(); root = null;
   }
-
-  let W = 0, H = 0, dpr = 1, ctx = null, cv = null, raf = 0;
-  function sizeCanvas() {
-    if (!root) return;
-    cv = root.querySelector("canvas"); dpr = Math.min(2, window.devicePixelRatio || 1);
-    W = window.innerWidth; H = window.innerHeight;
-    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-    cv.style.width = W + "px"; cv.style.height = H + "px";
-    ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  function showCard(title, body, btn) {
-    const c = root.querySelector(".np-card"); c.hidden = false;
-    c.querySelector("h2").textContent = title; c.querySelector("p").innerHTML = body;
-    c.querySelector(".np-go").textContent = btn;
-    let best = 0; try { best = Number(localStorage.getItem("np-best")) || 0; } catch (e) {}
-    c.querySelector(".np-best").textContent = best ? "Your best here: " + best : "";
-    c.querySelector(".np-go").focus();
-  }
-
-  /* ----- state ----- */
-  let targets = [], balls = [], puffs = [], pops = [], flakes = [], score = 0, left = 45, lastT = 0, spawnT = 0, santaT = 0, lastThrow = 0, stars = [];
-  const KINDS = {
-    tree:     { pts: 1,  size: 1.9, speed: 0.07 },
-    present:  { pts: 2,  size: 1.2, speed: 0.10 },
-    reindeer: { pts: 3,  size: 1.7, speed: 0.19 },
-    santa:    { pts: 10, size: 1.5, speed: 0.30 },
-  };
-  const unit = () => Math.min(W, H * 0.75) / 8;
-
-  function startRound() {
-    root.querySelector(".np-card").hidden = true;
-    targets = []; balls = []; puffs = []; pops = []; score = 0; left = 45; spawnT = 0; santaT = 4 + Math.random() * 3; lastT = performance.now();
-    running = true; hud();
-    root.onpointerdown = (e) => { if (e.target.closest(".np-x") || e.target.closest(".np-card")) return; throwAt(e.clientX, e.clientY); };
-  }
-  function hud() {
-    root.querySelector(".np-score").textContent = score;
-    root.querySelector(".np-time").textContent = Math.max(0, Math.ceil(left));
-  }
-  function spawn(kind) {
-    const k = KINDS[kind], u = unit(), dir = Math.random() < 0.5 ? 1 : -1;
-    const row = kind === "santa" ? 0.2 + Math.random() * 0.12 : 0.38 + Math.random() * 0.3;
-    targets.push({ kind, dir, x: dir > 0 ? -u * 2 : W + u * 2, base: H * row, y: H * row, s: k.size * u * (0.8 + row * 0.5),
-      v: k.speed * W * (0.8 + Math.random() * 0.5), ph: Math.random() * 6, hit: 0 });
-  }
-  function throwAt(x, y) {
-    const now = performance.now(); if (now - lastThrow < 140) return; lastThrow = now;
-    balls.push({ sx: W / 2, sy: H - 30, tx: x, ty: y, t: 0, dur: 0.34 });
-  }
-
-  function update(dt) {
-    left -= dt; if (left <= 0) { left = 0; endRound(); return; }
-    spawnT -= dt; santaT -= dt;
-    if (spawnT <= 0 && targets.length < 9) {
-      const r = Math.random(); spawn(r < 0.38 ? "tree" : r < 0.7 ? "present" : "reindeer");
-      spawnT = 0.5 + Math.random() * 0.6;
+  function startGame(root) {
+    const cv = root.querySelector("canvas"), card = root.querySelector(".np-card");
+    const INTRO = '<b>Pull back the slingshot and let go</b> to launch a present into a passing sleigh. Each one is 1 point. Watch out for the evil snowmen and the yeti walking through. They bat your present away! You have 45 seconds.';
+    let W = 0, H = 0, dpr = 1, ctx = null, running = false, lastT = 0, raf = 0;
+    function sizeCanvas() {
+      dpr = Math.min(2, window.devicePixelRatio || 1); W = window.innerWidth; H = window.innerHeight;
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + "px"; cv.style.height = H + "px";
+      ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    if (santaT <= 0) { spawn("santa"); santaT = 6 + Math.random() * 5; }
-    targets.forEach((t) => {
-      t.x += t.dir * t.v * dt; t.ph += dt * 4;
-      if (t.kind === "present") t.y = t.base - Math.abs(Math.sin(t.ph * 0.9)) * t.s * 1.1;
-      else if (t.kind === "tree") t.y = t.base + Math.sin(t.ph * 0.6) * t.s * 0.12;
-      else if (t.kind === "reindeer") t.y = t.base - Math.abs(Math.sin(t.ph * 1.2)) * t.s * 0.25;
-      else t.y = t.base + Math.sin(t.ph) * t.s * 0.2;
-      if (t.hit) t.hit += dt * 3;
-    });
-    targets = targets.filter((t) => t.hit < 1 && t.x > -W * 0.3 && t.x < W * 1.3);
-    balls.forEach((b) => {
-      b.t += dt / b.dur;
-      if (b.t >= 1 && !b.done) {
-        b.done = true;
-        let best = null, bd = 1e9;
-        targets.forEach((t) => {
-          if (t.hit) return;
-          const d = Math.hypot(b.tx - t.x, b.ty - (t.y - t.s * 0.45));
-          if (d < t.s * 0.6 + 10 && d < bd) { best = t; bd = d; }
-        });
-        if (best) {
-          best.hit = 0.01; const p = KINDS[best.kind].pts; score += p; hud();
-          pops.push({ x: best.x, y: best.y - best.s, t: 0, text: "+" + p, big: p === 10 });
-          for (let i = 0; i < (p === 10 ? 26 : 12); i++) puffs.push({ x: b.tx, y: b.ty, vx: (Math.random() - 0.5) * 320, vy: -Math.random() * 260, t: 0 });
-        } else for (let i = 0; i < 6; i++) puffs.push({ x: b.tx, y: b.ty, vx: (Math.random() - 0.5) * 140, vy: -Math.random() * 90, t: 0 });
+    sizeCanvas(); window.addEventListener("resize", sizeCanvas);
+    function showCard(title, body, btn) {
+      card.hidden = false; card.querySelector("h2").textContent = title; card.querySelector("p").innerHTML = body; card.querySelector(".np-go").textContent = btn;
+      let best = 0; try { best = Number(localStorage.getItem("toss-best2")) || 0; } catch (e) {}
+      card.querySelector(".np-best").textContent = best ? "Your best here: " + best : "";
+    }
+    showCard("Christmas Present Toss", INTRO, "Start tossing");
+    let muted = false, actx = null;
+    function beep(f, d, type, vol, slide) {
+      if (muted) return;
+      try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); const o = actx.createOscillator(), g = actx.createGain(), n = actx.currentTime;
+        o.type = type || "sine"; o.frequency.setValueAtTime(f, n); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, slide), n + d);
+        g.gain.setValueAtTime(vol || 0.06, n); g.gain.exponentialRampToValueAtTime(0.0001, n + d); o.connect(g); g.connect(actx.destination); o.start(); o.stop(n + d); } catch (e) {}
+    }
+
+    /* ----- state ----- */
+    let sleighs = [], balls = [], puffs = [], pops = [], flakes = [], stars = [], snowmen = [], aim = null, spawnT = 0, snowT = 3;
+    let yeti = { mode: "away", timer: 7, x: 0, dir: 1, p: 0 };
+    let score = 0, left = 45, stun = 0, shake = 0, nowS = 0, thrown = 0, lastThrow = 0;
+    const unit = () => Math.min(W, H * 0.75) / 8;
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const SXf = () => W / 2, SYf = () => H - 130;
+    const G = () => H * 1.6, VMAX = () => H * 1.75, PULL = () => Math.min(H * 0.22, 170);
+    window.__toss = { peaceful: false, state: () => ({ score, left, stun, yeti: yeti.mode, sleighs: sleighs.map((s) => ({ x: s.x, y: s.y, s: s.s })), balls: balls.length, W, H }), launch: (vx, vy) => launch(vx, vy), start: () => startRound(), set: (k, v) => { if (k === "left") left = v; if (k === "stun") stun = v; }, yetiNow: () => { yeti.timer = 0; } };
+
+    function mkSleigh(first) {
+      const u = unit(), dir = Math.random() < 0.5 ? 1 : -1, s = 2.1 * u;
+      let y = 0, tries = 0; do { y = H * rnd(0.2, 0.5); tries++; } while (tries < 20 && sleighs.some((o) => Math.abs(o.y - y) < H * 0.13));
+      const sl = { dir, y, s, v: W * rnd(0.17, 0.27), ph: rnd(0, 6), x: dir > 0 ? -s * 2.4 : W + s * 2.4, bump: 0 };
+      if (first) sl.x = W * rnd(0.3, 0.7); sleighs.push(sl);
+    }
+    function startRound() {
+      card.hidden = true; balls = []; puffs = []; pops = []; sleighs = []; score = 0; left = 45; stun = 0; thrown = 0; aim = null; spawnT = 1.2; lastT = performance.now();
+      const u = unit(); mkSleigh(true);
+      snowmen = []; snowT = 3.5;
+      yeti = { mode: "away", timer: 8, x: 0, dir: 1, p: 0 };
+      running = true; hud();
+    }
+    function hud() {
+      root.querySelector(".np-score").textContent = score;
+      const t = root.querySelector(".np-time"); t.textContent = Math.max(0, Math.ceil(left)); t.classList.toggle("low", left <= 10);
+    }
+    function aimVec() {
+      if (!aim) return null;
+      let dx = aim.sx - aim.cx, dy = aim.sy - aim.cy; const m = Math.hypot(dx, dy), k = m > PULL() ? PULL() / m : 1;
+      dx *= k; dy *= k; const pm = Math.min(m, PULL());
+      return { dx, dy, pm, vx: dx * VMAX() / PULL(), vy: dy * VMAX() / PULL() };
+    }
+    function launch(vx, vy) {
+      if (!running) return false;
+      const now = performance.now(); if (now - lastThrow < 140) return false; lastThrow = now;
+      thrown++; balls.push({ x: SXf(), y: SYf(), vx, vy, rot: 0, idx: thrown, done: false, swatted: false }); beep(320, 0.1, "triangle", 0.05, 520); return true;
+    }
+    function onDown(e) { if (!running || e.target.closest(".np-card, .np-x")) return; aim = { sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY }; try { root.setPointerCapture(e.pointerId); } catch (x) {} }
+    function onMove(e) { if (aim) { aim.cx = e.clientX; aim.cy = e.clientY; } }
+    function onUp() { const a = aimVec(); aim = null; if (!a || !running) return; if (a.pm < 26) return; launch(a.vx, a.vy); }
+    root.addEventListener("pointerdown", onDown); root.addEventListener("pointermove", onMove); root.addEventListener("pointerup", onUp); root.addEventListener("pointercancel", () => { aim = null; });
+    function burst(x, y, n, sp) { for (let i = 0; i < n; i++) puffs.push({ x, y, vx: (Math.random() - 0.5) * sp, vy: -Math.random() * sp * 0.8, t: 0 }); }
+
+    function update(dt) {
+      nowS += dt; left -= dt; if (left <= 0) { left = 0; endRound(); return; }
+      shake = Math.max(0, shake - dt * 14);
+      // sleighs run across and off the screen
+      sleighs.forEach((s) => { s.x += s.dir * s.v * dt; s.ph += dt * 3; s.yy = s.y + Math.sin(s.ph) * s.s * 0.06; if (s.bump > 0) s.bump = Math.max(0, s.bump - dt * 4); });
+      sleighs = sleighs.filter((s) => s.x > -s.s * 2.8 && s.x < W + s.s * 2.8);
+      spawnT -= dt; if (sleighs.length < 2 && spawnT <= 0) { mkSleigh(false); spawnT = rnd(0.8, 2); }
+      // evil snowmen cross the screen too
+      snowT -= dt;
+      if (!window.__toss.peaceful && snowT <= 0 && snowmen.length < 2) {
+        const dir = Math.random() < 0.5 ? 1 : -1, h = unit() * 2.3;
+        snowmen.push({ dir, h, x: dir > 0 ? -h : W + h, by: H * rnd(0.52, 0.74), v: W * rnd(0.12, 0.18), ph: rnd(0, 6) }); snowT = rnd(3.5, 6);
       }
-    });
-    balls = balls.filter((b) => !b.done);
-    puffs.forEach((p) => { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; });
-    puffs = puffs.filter((p) => p.t < 0.6);
-    pops.forEach((p) => { p.t += dt; });
-    pops = pops.filter((p) => p.t < 0.9);
-    hud();
-  }
+      snowmen.forEach((m) => { m.x += m.dir * m.v * dt; m.ph += dt * 7; });
+      snowmen = snowmen.filter((m) => m.x > -m.h * 1.5 && m.x < W + m.h * 1.5);
+      // the yeti walks across the screen too
+      const ys = H * 0.3, ycy = H * 0.6; yeti.timer -= dt;
+      if (yeti.mode === "away") { if (window.__toss.peaceful) yeti.timer = Math.max(yeti.timer, 1); else if (yeti.timer <= 0) { yeti.mode = "warn"; yeti.timer = 1.3; yeti.dir = Math.random() < 0.5 ? 1 : -1; beep(110, 0.9, "sawtooth", 0.08, 70); } }
+      else if (yeti.mode === "warn") { shake = Math.max(shake, 2); if (yeti.timer <= 0) { yeti.mode = "walk"; yeti.x = yeti.dir > 0 ? -ys * 0.7 : W + ys * 0.7; } }
+      else if (yeti.mode === "walk") { yeti.x += yeti.dir * W * 0.2 * dt; shake = Math.max(shake, 1.5); if (yeti.x < -ys * 0.9 || yeti.x > W + ys * 0.9) { yeti.mode = "away"; yeti.timer = rnd(7, 11); } }
+      // presents in flight (slingshot physics)
+      balls.forEach((b) => {
+        b.vy += G() * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.rot += dt * (6 + Math.abs(b.vx) * 0.004);
+        snowmen.forEach((m) => { if (b.done || b.swatted) return; const ex = (b.x - m.x) / (m.h * 0.3), ey = (b.y - (m.by - m.h * 0.55)) / (m.h * 0.62);
+          if (ex * ex + ey * ey < 1) { b.swatted = true; b.vx = (b.x < m.x ? -1 : 1) * rnd(300, 480); b.vy = -rnd(220, 380); burst(b.x, b.y, 14, 260); pops.push({ x: b.x, y: b.y - 20, t: 0, text: "BONK!", big: true }); beep(190, 0.15, "triangle", 0.08, 80); } });
+        if (!b.done && !b.swatted && yeti.mode === "walk") {
+          const ex = (b.x - yeti.x) / (ys * 0.45), ey = (b.y - (ycy - ys * 0.12)) / (ys * 0.72);
+          if (ex * ex + ey * ey < 1) { b.swatted = true; b.vx = -yeti.dir * rnd(520, 760); b.vy = -rnd(200, 420); shake = 9; burst(b.x, b.y, 22, 340); pops.push({ x: b.x, y: b.y - 20, t: 0, text: "SWAT!", big: true }); beep(120, 0.22, "square", 0.09, 50); }
+        }
+        if (!b.done && !b.swatted) sleighs.forEach((s) => {
+          if (b.done) return; const yy = s.yy == null ? s.y : s.yy;
+          if (Math.abs(b.x - s.x) < s.s * 0.5 && b.y > yy - s.s * 0.64 && b.y < yy - s.s * 0.16) { b.done = true; s.bump = 1; score++; hud(); pops.push({ x: s.x, y: yy - s.s * 0.9, t: 0, text: "+1" }); burst(s.x, yy - s.s * 0.4, 14, 320); beep(700, 0.2, "sine", 0.07); }
+        });
+        if (!b.done && (b.y > H - 6 && b.vy > 0 || b.x < -80 || b.x > W + 80 || b.y > H + 80)) { b.done = true; if (b.y > H - 40 && b.x > 0 && b.x < W) burst(b.x, H - 14, 6, 140); }
+      });
+      balls = balls.filter((b) => !b.done);
+      puffs.forEach((p) => { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; }); puffs = puffs.filter((p) => p.t < 0.6);
+      pops.forEach((p) => { p.t += dt; }); pops = pops.filter((p) => p.t < 0.9);
+      hud();
+    }
+    function endRound() {
+      running = false; aim = null; let best = 0; try { best = Number(localStorage.getItem("toss-best2")) || 0; if (score > best) { best = score; localStorage.setItem("toss-best2", String(score)); } } catch (e) {}
+      const rating = score >= 25 ? "Present champion!" : score >= 15 ? "Great aim!" : score >= 7 ? "Nice shooting!" : "Keep practicing!";
+      showCard(rating, "You scored <b>" + score + "</b> points.", "Play again"); card.querySelector(".np-go").onclick = () => startRound();
+    }
+    card.querySelector(".np-go").onclick = () => startRound();
 
-  function endRound() {
-    running = false;
-    let best = 0; try { best = Number(localStorage.getItem("np-best")) || 0; if (score > best) { best = score; localStorage.setItem("np-best", String(score)); } } catch (e) {}
-    const rating = score >= 60 ? "Snowball champion!" : score >= 35 ? "Great arm!" : score >= 15 ? "Nice throwing!" : "Keep practicing!";
-    showCard(rating, "You scored <b>" + score + "</b> points.", "Throw again");
-    root.querySelector(".np-card .np-go").onclick = () => startRound();
-    root.onpointerdown = null;
-  }
-
-  /* ----- drawing ----- */
-  function initScene() {
+    /* ----- drawing (same flat style and scene as the snowball game) ----- */
     stars = Array.from({ length: 60 }, () => ({ x: Math.random(), y: Math.random() * 0.45, r: Math.random() * 1.4 + 0.3, p: Math.random() * 6 }));
     flakes = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 2 + 1, v: 0.03 + Math.random() * 0.06 }));
-  }
-  initScene();
-  function bg(t) {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#07163a"); g.addColorStop(0.55, "#1d4f91"); g.addColorStop(1, "#9fd0f5");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    stars.forEach((s) => { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t / 700 + s.p); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 7); ctx.fill(); });
-    for (let i = 0; i < 3; i++) {
-      const top = H * (0.08 + i * 0.05), gr = ctx.createLinearGradient(0, top - 30, 0, top + H * 0.22);
-      const c = i === 1 ? "123,224,255" : "143,167,255";
-      gr.addColorStop(0, "rgba(" + c + ",0)"); gr.addColorStop(0.25, "rgba(" + c + ",0.28)"); gr.addColorStop(1, "rgba(" + c + ",0)");
-      ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(0, top + H * 0.22);
-      for (let x = 0; x <= W + 20; x += 20) ctx.lineTo(x, top + Math.sin(x / 90 + t / 1800 + i) * 26);
-      ctx.lineTo(W + 20, top + H * 0.22); ctx.fill();
+    function bg(t) {
+      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#07163a"); g.addColorStop(0.55, "#1d4f91"); g.addColorStop(1, "#9fd0f5");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      stars.forEach((s) => { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t / 700 + s.p); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 7); ctx.fill(); });
+      ctx.globalAlpha = 0.16;
+      for (let i = 0; i < 3; i++) { ctx.fillStyle = i === 1 ? "#7be0ff" : "#8fa7ff"; ctx.beginPath(); ctx.moveTo(0, H * 0.1 + i * 24); for (let x = 0; x <= W; x += 20) ctx.lineTo(x, H * (0.12 + i * 0.04) + Math.sin(x / 90 + t / 1800 + i) * 26); ctx.lineTo(W, H * 0.32); ctx.lineTo(0, H * 0.32); ctx.fill(); }
+      ctx.globalAlpha = 1;
+      const hill = (y, amp, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, H); for (let x = 0; x <= W; x += 16) ctx.lineTo(x, y + Math.sin(x / (W / 3) + amp) * amp); ctx.lineTo(W, H); ctx.fill(); };
+      hill(H * 0.52, 18, "#cfe6fa"); hill(H * 0.62, 26, "#e6f3ff"); hill(H * 0.82, 14, "#f7fbff");
+      const px = W * 0.86, py = H * 0.84;
+      ctx.fillStyle = "#fff"; ctx.fillRect(px - 5, py - H * 0.2, 10, H * 0.2);
+      ctx.fillStyle = "#d43a4c"; for (let i = 0; i < 6; i++) ctx.fillRect(px - 5, py - H * 0.2 + i * (H * 0.2 / 6) + 6, 10, H * 0.2 / 12);
+      ctx.fillStyle = "#f4c54f"; ctx.beginPath(); ctx.arc(px, py - H * 0.2 - 6, 9, 0, 7); ctx.fill();
+      flakes.forEach((f) => { ctx.globalAlpha = 0.8; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(f.x * W, f.y * H, f.r, 0, 7); ctx.fill(); });
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
-    // hills
-    const hill = (y, amp, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, H); for (let x = 0; x <= W + 16; x += 16) ctx.lineTo(x, y + Math.sin(x / (W / 3) + amp) * amp); ctx.lineTo(W + 16, H); ctx.fill(); };
-    hill(H * 0.52, 18, "#cfe6fa"); hill(H * 0.62, 26, "#e6f3ff"); hill(H * 0.82, 14, "#f7fbff");
-    // north pole striped post
-    const px = W * 0.86, py = H * 0.84;
-    ctx.fillStyle = "#fff"; ctx.fillRect(px - 5, py - H * 0.2, 10, H * 0.2);
-    ctx.fillStyle = "#d43a4c"; for (let i = 0; i < 6; i++) ctx.fillRect(px - 5, py - H * 0.2 + i * (H * 0.2 / 6) + 6, 10, H * 0.2 / 12);
-    ctx.fillStyle = "#f4c54f"; ctx.beginPath(); ctx.arc(px, py - H * 0.2 - 6, 9, 0, 7); ctx.fill();
-    flakes.forEach((f) => { ctx.globalAlpha = 0.8; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(f.x * W, f.y * H, f.r, 0, 7); ctx.fill(); });
-    ctx.globalAlpha = 1;
-  }
-  function drawTree(t) {
-    const s = t.s; ctx.fillStyle = "#6b4a2b"; ctx.fillRect(-s * 0.06, -s * 0.12, s * 0.12, s * 0.14);
-    [["#1c6b4a", 0.55, 0.5], ["#238a5c", 0.45, 0.8], ["#2fa872", 0.33, 1.05]].forEach(([c, w, y]) => {
-      ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(-s * w * 0.6, -s * (y - 0.45)); ctx.lineTo(0, -s * y - s * 0.02); ctx.lineTo(s * w * 0.6, -s * (y - 0.45)); ctx.fill();
-    });
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, -s * 1.07, s * 0.05, 0, 7); ctx.fill();
-  }
-  function drawPresent(t) {
-    const s = t.s; ctx.fillStyle = "#d43a4c"; ctx.fillRect(-s * 0.4, -s * 0.7, s * 0.8, s * 0.7);
-    ctx.fillStyle = "#f4c54f"; ctx.fillRect(-s * 0.06, -s * 0.7, s * 0.12, s * 0.7); ctx.fillRect(-s * 0.4, -s * 0.38, s * 0.8, s * 0.1);
-    ctx.beginPath(); ctx.ellipse(-s * 0.14, -s * 0.78, s * 0.14, s * 0.08, -0.5, 0, 7); ctx.ellipse(s * 0.14, -s * 0.78, s * 0.14, s * 0.08, 0.5, 0, 7); ctx.fill();
-  }
-  function drawSnowman(t) {
-    const s = t.s, sway = Math.sin(t.ph * 1.5) * s * 0.03;
-    ctx.save(); ctx.translate(sway, 0);
-    // stick arms, raised and grabby
-    ctx.strokeStyle = "#4a3320"; ctx.lineWidth = Math.max(2, s * 0.035); ctx.lineCap = "round";
-    const wave = Math.sin(t.ph * 2) * s * 0.06;
-    ctx.beginPath(); ctx.moveTo(-s * 0.2, -s * 0.5); ctx.lineTo(-s * 0.5, -s * (0.72 + 0.02) - wave); ctx.moveTo(-s * 0.42, -s * 0.68 - wave); ctx.lineTo(-s * 0.5, -s * 0.84 - wave); ctx.moveTo(-s * 0.42, -s * 0.68 - wave); ctx.lineTo(-s * 0.58, -s * 0.74 - wave);
-    ctx.moveTo(s * 0.2, -s * 0.5); ctx.lineTo(s * 0.5, -s * 0.72 + wave); ctx.moveTo(s * 0.42, -s * 0.68 + wave); ctx.lineTo(s * 0.5, -s * 0.84 + wave); ctx.moveTo(s * 0.42, -s * 0.68 + wave); ctx.lineTo(s * 0.58, -s * 0.74 + wave); ctx.stroke();
-    // body: three snowballs
-    const ball = (y, r) => { ctx.fillStyle = "#f4f9ff"; ctx.strokeStyle = "#a9c9ea"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, y, r, 0, 7); ctx.fill(); ctx.stroke(); };
-    ball(-s * 0.2, s * 0.2); ball(-s * 0.5, s * 0.16); ball(-s * 0.78, s * 0.13);
-    // black hat
-    ctx.fillStyle = "#15151d"; ctx.fillRect(-s * 0.17, -s * 0.87, s * 0.34, s * 0.04); ctx.fillRect(-s * 0.1, -s * 1.03, s * 0.2, s * 0.17);
-    ctx.fillStyle = "#8e1f2c"; ctx.fillRect(-s * 0.1, -s * 0.89, s * 0.2, s * 0.03);
-    // glowing red eyes with angry brows
-    ctx.fillStyle = "#ff2b2b"; ctx.shadowColor = "#ff2b2b"; ctx.shadowBlur = s * 0.1;
-    ctx.beginPath(); ctx.arc(-s * 0.05, -s * 0.78, s * 0.025, 0, 7); ctx.arc(s * 0.05, -s * 0.78, s * 0.025, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = "#15151d"; ctx.lineWidth = Math.max(2, s * 0.025);
-    ctx.beginPath(); ctx.moveTo(-s * 0.09, -s * 0.835); ctx.lineTo(-s * 0.02, -s * 0.805); ctx.moveTo(s * 0.09, -s * 0.835); ctx.lineTo(s * 0.02, -s * 0.805); ctx.stroke();
-    // carrot nose and jagged grin
-    ctx.fillStyle = "#ff8a1f"; ctx.beginPath(); ctx.moveTo(0, -s * 0.76); ctx.lineTo(s * 0.12, -s * 0.735); ctx.lineTo(0, -s * 0.72); ctx.fill();
-    ctx.strokeStyle = "#15151d"; ctx.beginPath(); ctx.moveTo(-s * 0.07, -s * 0.69);
-    for (let i = 0; i < 5; i++) ctx.lineTo(-s * 0.07 + (i + 1) * s * 0.028, -s * (i % 2 ? 0.69 : 0.665)); ctx.stroke();
-    // coal buttons and a red scarf
-    ctx.fillStyle = "#15151d"; [-0.55, -0.45, -0.3].forEach((y) => { ctx.beginPath(); ctx.arc(0, s * y, s * 0.02, 0, 7); ctx.fill(); });
-    ctx.fillStyle = "#c92f42"; ctx.fillRect(-s * 0.13, -s * 0.66, s * 0.26, s * 0.045); ctx.fillRect(s * 0.04, -s * 0.66, s * 0.05, s * 0.14);
-    ctx.restore();
-  }
-  function drawSanta(t) {
-    const s = t.s;
-    ctx.fillStyle = "#7a4a2a"; ctx.fillRect(-s * 0.6, -s * 0.12, s * 1.2, s * 0.06);       // sleigh runner
-    ctx.fillStyle = "#c92f42"; ctx.beginPath(); ctx.moveTo(-s * 0.55, -s * 0.12); ctx.lineTo(-s * 0.5, -s * 0.45); ctx.lineTo(s * 0.5, -s * 0.45); ctx.lineTo(s * 0.6, -s * 0.12); ctx.fill();
-    ctx.fillStyle = "#d43a4c"; ctx.beginPath(); ctx.arc(0, -s * 0.5, s * 0.2, 0, 7); ctx.fill();   // body
-    ctx.fillStyle = "#f5cdb0"; ctx.beginPath(); ctx.arc(0, -s * 0.78, s * 0.12, 0, 7); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, -s * 0.7, s * 0.12, 0, Math.PI); ctx.fill();   // beard
-    ctx.fillStyle = "#d43a4c"; ctx.beginPath(); ctx.moveTo(-s * 0.14, -s * 0.82); ctx.lineTo(0, -s * 1.05); ctx.lineTo(s * 0.14, -s * 0.82); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, -s * 1.06, s * 0.04, 0, 7); ctx.fill(); ctx.fillRect(-s * 0.15, -s * 0.84, s * 0.3, s * 0.05);
-    ctx.fillStyle = "#f4c54f"; ctx.font = "bold " + Math.round(s * 0.28) + "px Nunito, sans-serif"; ctx.textAlign = "center"; ctx.fillText("10", 0, -s * 1.2);
-  }
-  function draw(t) {
-    bg(t);
-    targets.slice().sort((a, b) => a.base - b.base).forEach((tg) => {
-      ctx.save(); ctx.translate(tg.x, tg.y);
-      const hitScale = tg.hit ? 1 - tg.hit * 0.6 : 1; ctx.globalAlpha = tg.hit ? 1 - tg.hit : 1;
-      if (tg.dir < 0 && tg.kind !== "tree" && tg.kind !== "present" && tg.kind !== "reindeer") ctx.scale(-1, 1);
-      if (tg.hit) { ctx.rotate(tg.hit * 1.2 * tg.dir); ctx.scale(hitScale, hitScale); }
-      ({ tree: drawTree, present: drawPresent, reindeer: drawSnowman, santa: drawSanta })[tg.kind](tg);
+    function drawPresentBox(s) {
+      ctx.fillStyle = "#d43a4c"; ctx.fillRect(-s * 0.4, -s * 0.7, s * 0.8, s * 0.7);
+      ctx.fillStyle = "#f4c54f"; ctx.fillRect(-s * 0.06, -s * 0.7, s * 0.12, s * 0.7); ctx.fillRect(-s * 0.4, -s * 0.38, s * 0.8, s * 0.1);
+      ctx.beginPath(); ctx.ellipse(-s * 0.14, -s * 0.78, s * 0.14, s * 0.08, -0.5, 0, 7); ctx.ellipse(s * 0.14, -s * 0.78, s * 0.14, s * 0.08, 0.5, 0, 7); ctx.fill();
+    }
+    function drawReindeer(s, ph) {
+      const leg = Math.sin(ph * 2) * s * 0.08;
+      ctx.fillStyle = "#8a5a35"; ctx.fillRect(-s * 0.3, -s * 0.18, s * 0.07, s * 0.18 + leg); ctx.fillRect(s * 0.2, -s * 0.18, s * 0.07, s * 0.18 - leg);
+      ctx.fillRect(-s * 0.18, -s * 0.18, s * 0.07, s * 0.18 - leg); ctx.fillRect(s * 0.08, -s * 0.18, s * 0.07, s * 0.18 + leg);
+      ctx.beginPath(); ctx.ellipse(0, -s * 0.38, s * 0.38, s * 0.2, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s * 0.42, -s * 0.68, s * 0.14, s * 0.11, -0.3, 0, 7); ctx.fill(); ctx.fillRect(s * 0.3, -s * 0.62, s * 0.1, s * 0.3);
+      ctx.strokeStyle = "#5b3a22"; ctx.lineWidth = Math.max(2, s * 0.03);
+      ctx.beginPath(); ctx.moveTo(s * 0.4, -s * 0.78); ctx.lineTo(s * 0.34, -s * 1); ctx.moveTo(s * 0.37, -s * 0.9); ctx.lineTo(s * 0.27, -s * 0.94); ctx.moveTo(s * 0.46, -s * 0.78); ctx.lineTo(s * 0.52, -s * 1); ctx.moveTo(s * 0.49, -s * 0.9); ctx.lineTo(s * 0.59, -s * 0.94); ctx.stroke();
+      ctx.fillStyle = "#e2384b"; ctx.beginPath(); ctx.arc(s * 0.55, -s * 0.68, s * 0.045, 0, 7); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(-s * 0.38, -s * 0.44, s * 0.05, 0, 7); ctx.fill();
+    }
+    function drawSleigh(sl, t) {
+      const s = sl.s, yy = sl.yy == null ? sl.y : sl.yy;
+      ctx.save(); ctx.translate(sl.x, yy); if (sl.bump) ctx.translate(0, Math.sin(sl.bump * Math.PI) * s * 0.08); if (sl.dir < 0) ctx.scale(-1, 1);
+      ctx.save(); ctx.translate(s * 1.25, 0); drawReindeer(s * 0.62, t / 150); ctx.restore();
+      ctx.strokeStyle = "#d9c9a0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(s * 0.5, -s * 0.3); ctx.lineTo(s * 1.0, -s * 0.26); ctx.stroke();
+      ctx.fillStyle = "#7a4a2a"; ctx.fillRect(-s * 0.6, -s * 0.12, s * 1.2, s * 0.06);
+      ctx.fillStyle = "#c92f42"; ctx.beginPath(); ctx.moveTo(-s * 0.55, -s * 0.12); ctx.lineTo(-s * 0.5, -s * 0.45); ctx.lineTo(s * 0.5, -s * 0.45); ctx.lineTo(s * 0.6, -s * 0.12); ctx.fill();
+      ctx.fillStyle = "#f4c54f"; ctx.fillRect(-s * 0.5, -s * 0.47, s * 1.0, s * 0.05);
+      ctx.fillStyle = "#238a5c"; ctx.fillRect(-s * 0.3, -s * 0.6, s * 0.22, s * 0.15); ctx.fillStyle = "#2f7bd8"; ctx.fillRect(s * 0.02, -s * 0.56, s * 0.2, s * 0.11);
       ctx.restore();
-    });
-    ctx.globalAlpha = 1;
-    // thrower
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(W / 2, H - 14, 16, 0, 7); ctx.fill();
-    balls.forEach((b) => {
-      const e = b.t, x = b.sx + (b.tx - b.sx) * e, y = b.sy + (b.ty - b.sy) * e - Math.sin(e * Math.PI) * 40, r = 13 - 6 * e;
-      ctx.fillStyle = "rgba(10,30,70,0.25)"; ctx.beginPath(); ctx.ellipse(x, y + 10, r, r * 0.4, 0, 0, 7); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.strokeStyle = "#b9d7f5"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.stroke();
-    });
-    puffs.forEach((p) => { ctx.globalAlpha = 1 - p.t / 0.6; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 7); ctx.fill(); });
-    pops.forEach((p) => {
-      ctx.globalAlpha = 1 - p.t / 0.9; ctx.fillStyle = p.big ? "#ffd75a" : "#fff"; ctx.strokeStyle = "#0b2a5c"; ctx.lineWidth = 4; ctx.textAlign = "center";
-      ctx.font = "900 " + (p.big ? 46 : 28) + "px Nunito, sans-serif"; const y = p.y - p.t * 60; ctx.strokeText(p.text, p.x, y); ctx.fillText(p.text, p.x, y);
-    });
-    ctx.globalAlpha = 1;
-  }
-  function idleLoop() {
-    cancelAnimationFrame(raf);
+    }
+    function drawSnowman(m, t) {
+      const h = m.h, sw = Math.sin(m.ph) * h * 0.04;
+      ctx.save(); ctx.translate(m.x, m.by - Math.abs(Math.sin(m.ph)) * h * 0.04);
+      ctx.fillStyle = "rgba(10,30,70,0.18)"; ctx.beginPath(); ctx.ellipse(0, 2, h * 0.28, h * 0.05, 0, 0, 7); ctx.fill();
+      const ball = (cy, r) => { ctx.fillStyle = "#fff"; ctx.strokeStyle = "#b9d7f5"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, cy, r, 0, 7); ctx.fill(); ctx.stroke(); };
+      ctx.strokeStyle = "#5b3a22"; ctx.lineWidth = Math.max(2, h * 0.03); ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-h * 0.1, -h * 0.5); ctx.lineTo(-h * 0.36, -h * 0.62 + sw * 4); ctx.moveTo(h * 0.1, -h * 0.5); ctx.lineTo(h * 0.36, -h * 0.62 - sw * 4); ctx.stroke();
+      ball(-h * 0.2, h * 0.2); ball(-h * 0.5, h * 0.15); ball(-h * 0.76, h * 0.12);
+      ctx.fillStyle = "#1a1a24"; ctx.fillRect(-h * 0.13, -h * 0.88, h * 0.26, h * 0.03); ctx.fillRect(-h * 0.08, -h * 1.02, h * 0.16, h * 0.15);
+      ctx.fillStyle = "#ff2d2d"; ctx.beginPath(); ctx.arc(-h * 0.045, -h * 0.77, h * 0.025, 0, 7); ctx.arc(h * 0.045, -h * 0.77, h * 0.025, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#1a1a24"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-h * 0.09, -h * 0.83); ctx.lineTo(-h * 0.02, -h * 0.8); ctx.moveTo(h * 0.09, -h * 0.83); ctx.lineTo(h * 0.02, -h * 0.8); ctx.stroke();
+      ctx.fillStyle = "#ff8a1f"; ctx.beginPath(); ctx.moveTo(0, -h * 0.75); ctx.lineTo(m.dir * h * 0.1, -h * 0.73); ctx.lineTo(0, -h * 0.71); ctx.fill();
+      ctx.restore();
+    }
+    function drawYeti(t) {
+      const y = yeti, s = H * 0.3, cy = H * 0.6;
+      if (y.mode === "warn") {
+        const ex = y.dir > 0 ? 34 : W - 34, a = 0.5 + 0.5 * Math.abs(Math.sin(t / 90));
+        ctx.fillStyle = "rgba(255,90,90," + (0.12 * a + 0.06) + ")"; ctx.fillRect(0, cy - s * 0.7, W, s * 1.4);
+        ctx.globalAlpha = 0.6 + 0.4 * a; ctx.fillStyle = "#ff6b6b"; ctx.font = "900 54px Nunito, sans-serif"; ctx.textAlign = "center"; ctx.fillText("!", ex, cy + 18); ctx.globalAlpha = 1; return;
+      }
+      if (y.mode !== "walk") return;
+      const bob = Math.abs(Math.sin(t / 220)) * -8, step = Math.sin(t / 220);
+      ctx.save(); ctx.translate(y.x, cy + bob); if (y.dir > 0) ctx.scale(-1, 1);
+      const FUR = "#f3f9ff", SH = "#cfe3f6", OUT = "#7fa9d4", DARK = "#2a4470";
+      const shaggy = (cx, cy2, rx, ry, n, amp, rot, fill) => {
+        ctx.beginPath();
+        for (let k = 0; k < n * 2; k++) { const a = (k / (n * 2)) * Math.PI * 2 + rot, r = k % 2 ? 1 : 1 + amp; const px = cx + Math.cos(a) * rx * r, py = cy2 + Math.sin(a) * ry * r; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+        ctx.closePath(); ctx.fillStyle = fill || FUR; ctx.fill(); ctx.strokeStyle = OUT; ctx.lineWidth = 2.5; ctx.lineJoin = "round"; ctx.stroke();
+      };
+      const limb = (x0, y0, x1, y1, w) => { ctx.lineCap = "round"; ctx.strokeStyle = OUT; ctx.lineWidth = w + 5; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.strokeStyle = SH; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); };
+      // far arm (behind), then legs
+      const swing = Math.sin(t / 220) * s * 0.18;
+      limb(s * 0.22, -s * 0.18, s * 0.3 - swing, s * 0.3, s * 0.15); shaggy(s * 0.3 - swing, s * 0.36, s * 0.11, s * 0.1, 6, 0.25, 0.3, SH);
+      [[-0.14, step], [0.14, -step]].forEach(([lx, st]) => {
+        limb(s * lx, s * 0.22, s * lx + st * s * 0.07, s * 0.48, s * 0.17);
+        ctx.fillStyle = FUR; ctx.strokeStyle = OUT; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.ellipse(s * lx - s * 0.05 + st * s * 0.07, s * 0.54, s * 0.17, s * 0.075, 0, 0, 7); ctx.fill(); ctx.stroke();
+      });
+      // hunched, shaggy body with fur tufts
+      shaggy(s * 0.02, -s * 0.04, s * 0.4, s * 0.5, 13, 0.1, 0.2, FUR);
+      ctx.strokeStyle = SH; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+      [[-0.14, 0.02], [0.06, 0.12], [0.2, -0.05], [-0.02, 0.28], [0.16, 0.24], [-0.2, 0.22]].forEach(([fx, fy]) => { ctx.beginPath(); ctx.moveTo(s * (fx - 0.04), s * fy); ctx.lineTo(s * fx, s * (fy + 0.07)); ctx.lineTo(s * (fx + 0.04), s * fy); ctx.stroke(); });
+      // near arm: long, swinging, with claws
+      const nx = -s * 0.25 + swing * 0.9, ny = s * 0.32;
+      limb(-s * 0.26, -s * 0.2, nx - s * 0.1, ny, s * 0.17); shaggy(nx - s * 0.1, ny + s * 0.06, s * 0.13, s * 0.11, 7, 0.25, 0.1, FUR);
+      ctx.strokeStyle = DARK; ctx.lineWidth = 3.5; for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(nx - s * 0.1 + k * s * 0.06, ny + s * 0.13); ctx.lineTo(nx - s * 0.1 + k * s * 0.07 - s * 0.01, ny + s * 0.22); ctx.stroke(); }
+      // head: low and forward, heavy brow, glowing eyes, big fangs
+      shaggy(-s * 0.2, -s * 0.4, s * 0.25, s * 0.21, 10, 0.12, 0.1, FUR);
+      ctx.fillStyle = "#4a6c9a"; ctx.beginPath(); ctx.ellipse(-s * 0.27, -s * 0.37, s * 0.15, s * 0.12, 0, 0, 7); ctx.fill();
+      shaggy(-s * 0.26, -s * 0.49, s * 0.17, s * 0.06, 6, 0.2, 0, FUR);            // brow ridge
+      ctx.fillStyle = "#ffe14a"; ctx.shadowColor = "#ffb300"; ctx.shadowBlur = 8; ctx.beginPath(); ctx.ellipse(-s * 0.33, -s * 0.42, s * 0.032, s * 0.024, 0.4, 0, 7); ctx.ellipse(-s * 0.2, -s * 0.42, s * 0.032, s * 0.024, -0.4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(-s * 0.335, -s * 0.42, s * 0.012, 0, 7); ctx.arc(-s * 0.205, -s * 0.42, s * 0.012, 0, 7); ctx.fill();
+      ctx.fillStyle = DARK; ctx.beginPath(); ctx.arc(-s * 0.285, -s * 0.37, s * 0.012, 0, 7); ctx.arc(-s * 0.255, -s * 0.37, s * 0.012, 0, 7); ctx.fill();
+      const gape = s * 0.035 + s * 0.035 * Math.abs(Math.sin(t / 110));
+      ctx.fillStyle = "#5a1020"; ctx.beginPath(); ctx.ellipse(-s * 0.27, -s * 0.3, s * 0.1, gape, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#fff"; [-0.34, -0.3, -0.24, -0.2].forEach((fx, k) => { const l = k % 3 === 0 ? s * 0.07 : s * 0.045; ctx.beginPath(); ctx.moveTo(s * fx, -s * 0.31); ctx.lineTo(s * (fx + 0.022), -s * 0.31); ctx.lineTo(s * (fx + 0.011), -s * 0.31 + l); ctx.fill(); });
+      ctx.restore();
+    }
+    function trajectory() {
+      const a = aimVec(); if (!a || a.pm < 26) return [];
+      const pts = []; let x = SXf(), y = SYf(), vx = a.vx, vy = a.vy; const dt = 1 / 60;
+      for (let i = 0; i < 90; i++) { vy += G() * dt; x += vx * dt; y += vy * dt; if (i % 4 === 3) pts.push([x, y]); if (y > H) break; }
+      return pts.slice(0, 12);
+    }
+    function drawSling(t) {
+      const x = SXf(), y = SYf(), a = aimVec(), px = a ? x - a.dx * 0.6 : x, py = a ? y - a.dy * 0.6 : y + 4;
+      // snow mound + wooden fork
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, H + 30, 80, Math.PI, 0); ctx.fill();
+      ctx.strokeStyle = "#5b3a22"; ctx.lineCap = "round"; ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(x, H - 8); ctx.lineTo(x, y + 26); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, y + 26); ctx.lineTo(x - 24, y); ctx.moveTo(x, y + 26); ctx.lineTo(x + 24, y); ctx.stroke();
+      const arms = [[x - 24, y], [x + 24, y]];
+      ctx.strokeStyle = "#3a2a1a"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(arms[0][0], arms[0][1]); ctx.lineTo(px, py + 4); ctx.stroke();
+      if (running) { ctx.save(); ctx.translate(px, py + 12); ctx.rotate(0); drawPresentBox(24); ctx.restore(); }
+      ctx.strokeStyle = "#3a2a1a"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(arms[1][0], arms[1][1]); ctx.lineTo(px, py + 4); ctx.stroke();
+      trajectory().forEach(([tx, ty], i) => { ctx.globalAlpha = 0.95 - i * 0.07; ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(11,42,92,0.55)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(tx, ty, 6 - i * 0.3, 0, 7); ctx.fill(); ctx.stroke(); }); ctx.globalAlpha = 1;
+    }
+    function draw(t) {
+      ctx.save(); if (shake > 0) ctx.translate(rnd(-1, 1) * shake, rnd(-1, 1) * shake);
+      bg(t);
+      snowmen.slice().sort((a, b) => a.by - b.by).forEach((m) => drawSnowman(m, t));
+      sleighs.forEach((s) => drawSleigh(s, t));
+      if (running || yeti.mode !== "away") drawYeti(t);
+      drawSling(t);
+      balls.forEach((b) => { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot); ctx.translate(0, 12); drawPresentBox(24); ctx.restore(); });
+      puffs.forEach((p) => { ctx.globalAlpha = 1 - p.t / 0.6; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 7); ctx.fill(); });
+      pops.forEach((p) => { ctx.globalAlpha = 1 - p.t / 0.9; ctx.fillStyle = p.big ? "#ffd75a" : "#fff"; ctx.strokeStyle = "#0b2a5c"; ctx.lineWidth = 4; ctx.textAlign = "center"; ctx.font = "900 " + (p.big ? 46 : 28) + "px Nunito, sans-serif"; const y = p.y - p.t * 60; ctx.strokeText(p.text, p.x, y); ctx.fillText(p.text, p.x, y); });
+      ctx.globalAlpha = 1; ctx.restore();
+    }
     const tick = (now) => {
-      if (!root || !ctx) return;
       const dt = Math.min(0.05, (now - lastT) / 1000 || 0); lastT = now;
       flakes.forEach((f) => { f.y += f.v * dt; f.x += Math.sin(now / 900 + f.r) * 0.0004; if (f.y > 1) { f.y = 0; f.x = Math.random(); } });
-      if (running) update(dt);
-      draw(now);
-      raf = requestAnimationFrame(tick);
+      if (running) update(dt); draw(now); raf = requestAnimationFrame(tick);
     };
     lastT = performance.now(); raf = requestAnimationFrame(tick);
+    return () => { running = false; aim = null; cancelAnimationFrame(raf); window.removeEventListener("resize", sizeCanvas); };
   }
-  window.__northPole = { open: openNP, state: () => ({ score, left, targets: targets.map((t) => ({ kind: t.kind, x: t.x, y: t.y, s: t.s, hit: t.hit })) }) };
+  window.__northPole = { open: openNP, close: closeNP };
 })();
 boot();
 </script>
